@@ -24,7 +24,7 @@ const CONFIG = {
     animation: {
         autoRotate: true,
         rotationSpeed: 0.00015,
-        cloudRotationSpeed: 0.00030,
+        cloudRotationSpeed: 0.00020,
         wobbleSpeed: 0.0008,
         wobbleAmount: 0.01,
         dragSensitivity: 0.09
@@ -265,7 +265,7 @@ function setupEvents() {
 }
 
 function setupDebugControls() {
-    const debugParams = ['focus', 'aperture', 'maxblur', 'saturation', 'brightness', 'relief', 'displacement', 'oceanShine'];
+    const debugParams = ['focus', 'aperture', 'maxblur', 'saturation', 'brightness', 'relief', 'displacement', 'oceanShine', 'stylization', 'paintEffect', 'nightMode', 'glowIntensity'];
 
     debugParams.forEach(param => {
         const slider = document.getElementById(param);
@@ -289,6 +289,11 @@ function setupDebugControls() {
             updateValue(value);
         });
     });
+
+    // Style preset buttons
+    document.getElementById('preset-realistic')?.addEventListener('click', () => applyPreset('realistic'));
+    document.getElementById('preset-miniature')?.addEventListener('click', () => applyPreset('miniature'));
+    document.getElementById('preset-night')?.addEventListener('click', () => applyPreset('night'));
 
     document.addEventListener('keydown', handleKeyboardShortcuts);
 }
@@ -335,6 +340,59 @@ function updateDebugParameter(param, value) {
         CONFIG.postProcessing[param] = value;
         if (postProcessing) postProcessing.setParameters({ [param]: value });
     }
+}
+
+function applyPreset(presetName) {
+    const presets = {
+        realistic: {
+            stylization: 0,
+            paintEffect: 0,
+            nightMode: 0,
+            glowIntensity: 0.5,
+            saturation: 1.0,
+            brightness: 1.0,
+            displacement: 0.05,
+            relief: 0.5
+        },
+        miniature: {
+            stylization: 0.7,
+            paintEffect: 0.6,
+            nightMode: 0,
+            glowIntensity: 0.3,
+            saturation: 1.5,
+            brightness: 1.2,
+            displacement: 0.15,
+            relief: 1.2,
+            aperture: 4,
+            maxblur: 0.02
+        },
+        night: {
+            stylization: 1.0,
+            paintEffect: 0.8,
+            nightMode: 0.8,
+            glowIntensity: 1.5,
+            saturation: 1.8,
+            brightness: 0.9,
+            displacement: 0.2,
+            relief: 1.5,
+            aperture: 3,
+            maxblur: 0.025,
+            focus: 6.1
+        }
+    };
+
+    const preset = presets[presetName];
+    if (!preset) return;
+
+    Object.entries(preset).forEach(([key, value]) => {
+        updateDebugParameter(key, value);
+        const slider = document.getElementById(key);
+        const input = document.getElementById(key + '-input');
+        if (slider) slider.value = value;
+        if (input) input.value = value.toFixed(['maxblur', 'displacement', 'oceanShine'].includes(key) ? 3 : 2);
+    });
+
+    console.log(`Applied preset: ${presetName}`);
 }
 
 function resetParameters() {

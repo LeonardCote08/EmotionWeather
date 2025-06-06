@@ -1,32 +1,42 @@
 /**
- * lights.js - Lighting setup for the Emotion Weather scene.
- * Creates a studio-like three-point lighting environment.
+ * lights.js - Dramatic lighting setup for miniature diorama effect
+ * Enhanced for "Night of the Mini Dead" aesthetic
  */
 
 function createLighting(scene) {
-    // Ambient light provides a base illumination for the entire scene.
-    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    // Balanced ambient for initial visibility
+    const ambientLight = new THREE.AmbientLight(0x6a6a8a, 0.4);
+    scene.add(ambientLight);
 
-    // The main "sun" light, acting as the key light.
-    // It's warmer (fff5e6) and is the primary source of light and shadows.
-    const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.8);
-    sunLight.position.set(5, 5, 5);
+    // Main dramatic key light - warm theatrical spotlight
+    const sunLight = new THREE.DirectionalLight(0xffdd99, 1.8);
+    sunLight.position.set(8, 10, 5);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.set(2048, 2048);
-    sunLight.shadow.camera.near = 1;
-    sunLight.shadow.camera.far = 20;
-    sunLight.shadow.bias = -0.0001;
+    sunLight.shadow.mapSize.set(4096, 4096);
+    sunLight.shadow.camera.near = 0.5;
+    sunLight.shadow.camera.far = 25;
+    sunLight.shadow.camera.left = -10;
+    sunLight.shadow.camera.right = 10;
+    sunLight.shadow.camera.top = 10;
+    sunLight.shadow.camera.bottom = -10;
+    sunLight.shadow.bias = -0.0002;
+    sunLight.shadow.normalBias = 0.02;
     scene.add(sunLight);
 
-    // A cooler fill light from the opposite side to soften shadows.
-    const fillLight = new THREE.DirectionalLight(0xe6f0ff, 0.7);
-    fillLight.position.set(-10, 5, 5);
+    // Cool moonlight fill from opposite side
+    const fillLight = new THREE.DirectionalLight(0x8899ff, 0.6);
+    fillLight.position.set(-8, 3, -5);
     scene.add(fillLight);
 
-    // A backlight to create a rim-lighting effect, separating the Earth from the background.
-    const backLight = new THREE.DirectionalLight(0xffe6d5, 1.0);
-    backLight.position.set(0, 5, -10);
-    scene.add(backLight);
+    // Dramatic rim light for miniature pop
+    const rimLight = new THREE.DirectionalLight(0xff88ff, 0.8);
+    rimLight.position.set(0, 8, -12);
+    scene.add(rimLight);
 
-    return { sunLight, fillLight, backLight };
+    // Subtle underlight for added depth
+    const underLight = new THREE.DirectionalLight(0x00ff88, 0.2);
+    underLight.position.set(0, -10, 0);
+    scene.add(underLight);
+
+    return { sunLight, fillLight, rimLight, underLight };
 }
