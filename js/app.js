@@ -24,7 +24,7 @@ const CONFIG = {
     animation: {
         autoRotate: true,
         rotationSpeed: 0.00015,
-        cloudRotationSpeed: 0.00020,
+        cloudRotationSpeed: 0.00030,
         wobbleSpeed: 0.0008,
         wobbleAmount: 0.01,
         dragSensitivity: 0.09

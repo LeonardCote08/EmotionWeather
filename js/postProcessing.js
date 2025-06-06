@@ -65,6 +65,7 @@ class PostProcessing {
         this.scene = scene;
         this.camera = camera;
         this.params = {};
+        this.useTiltShift = false; // Toggle between Bokeh and TiltShift
 
         console.log('PostProcessing constructor called');
         console.log('THREE.BokehPass exists?', typeof THREE.BokehPass !== 'undefined');
