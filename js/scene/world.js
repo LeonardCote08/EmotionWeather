@@ -1,6 +1,6 @@
 /**
  * world.js - Manages the creation of all world-related objects
- * V5.0 - Enhanced cloud fading system for diorama effect
+ * V6.0 - Added stylized biome coloring system for diorama effect
  */
 
 const worldObjects = {
@@ -48,10 +48,11 @@ function createEarth(renderer, loadingManager) {
     });
 
     earthMaterial.onBeforeCompile = (shader) => {
-        console.log("Compiling custom EARTH shader...");
+        console.log("Compiling custom EARTH shader with biomes...");
         shader.uniforms.uDisplacementMap = { value: displacementTexture };
         shader.uniforms.uDisplacementScale = { value: CONFIG.earth.displacementScale };
         shader.uniforms.uOceanShine = { value: CONFIG.earth.oceanShine };
+        shader.uniforms.uBiomeBlend = { value: CONFIG.earth.biomeBlend || 0.0 };
 
         // Inject uniforms
         const commonInjection = `
@@ -59,34 +60,111 @@ function createEarth(renderer, loadingManager) {
             uniform sampler2D uDisplacementMap;
             uniform float uDisplacementScale;
             uniform float uOceanShine;
+            uniform float uBiomeBlend;
+            
+            varying vec3 vWorldPosition;
+            varying float vElevation;
         `;
 
         shader.vertexShader = shader.vertexShader.replace('#include <common>', commonInjection);
         shader.fragmentShader = shader.fragmentShader.replace('#include <common>', commonInjection);
 
-        // Inject vertex displacement logic
+        // Pass world position to fragment shader
         shader.vertexShader = shader.vertexShader.replace(
             '#include <begin_vertex>',
             `
             #include <begin_vertex>
             float displacement = texture2D(uDisplacementMap, uv).r;
+            vElevation = displacement;
             transformed += normalize(normal) * displacement * uDisplacementScale;
             `
         );
 
-        // Inject fragment ocean shine logic
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <worldpos_vertex>',
+            `
+            #include <worldpos_vertex>
+            vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+            `
+        );
+
+        // Inject biome coloring logic
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <color_fragment>',
+            `
+            #include <color_fragment>
+            
+            // Calculate spherical coordinates for biome determination
+            vec3 normalizedPos = normalize(vWorldPosition);
+            float latitude = asin(normalizedPos.y) * 57.2958; // Convert to degrees
+            float longitude = atan(normalizedPos.x, normalizedPos.z) * 57.2958;
+            
+            // Stylized biome colors (vibrant toy-like)
+            vec3 biomeColor = vec3(0.0);
+            
+            // Ocean detection from roughness map
+            float isOcean = 1.0 - texture2D(roughnessMap, vUv).g;
+            
+            if (isOcean > 0.5) {
+                // Ocean: Vibrant cobalt blue
+                biomeColor = vec3(0.0, 0.28, 0.67); // #0047AB
+            } else {
+                // Land biomes based on latitude and elevation
+                if (abs(latitude) > 60.0) {
+                    // Arctic: Bright white with blue tint
+                    biomeColor = vec3(0.88, 0.93, 1.0);
+                } else if (abs(latitude) > 50.0) {
+                    // Tundra: Purple-grey
+                    biomeColor = vec3(0.58, 0.44, 0.86); // #9370DB
+                } else if (abs(latitude) > 35.0) {
+                    // Temperate forest: Vibrant emerald
+                    biomeColor = vec3(0.0, 0.8, 0.4); // Bright green
+                } else if (abs(latitude) < 25.0) {
+                    // Tropical: Mix based on moisture
+                    if (longitude > -20.0 && longitude < 60.0 && latitude > -10.0) {
+                        // Sahara region: Coral orange
+                        biomeColor = vec3(1.0, 0.5, 0.31); // #FF7F50
+                    } else {
+                        // Rainforest: Deep emerald
+                        biomeColor = vec3(0.13, 0.55, 0.13); // Forest green
+                    }
+                } else {
+                    // Grassland: Golden yellow-green
+                    biomeColor = vec3(0.74, 0.72, 0.42); // #BDB76B
+                }
+                
+                // Elevation modifications
+                if (vElevation > 0.4) {
+                    // Mountains: Add purple tint
+                    biomeColor = mix(biomeColor, vec3(0.58, 0.44, 0.86), 0.5);
+                    if (vElevation > 0.6) {
+                        // Snow caps: Bright white
+                        biomeColor = vec3(0.95, 0.95, 1.0);
+                    }
+                }
+            }
+            
+            // Blend between realistic texture and stylized biomes
+            diffuseColor.rgb = mix(diffuseColor.rgb, biomeColor, uBiomeBlend);
+            
+            // Add slight saturation boost even in realistic mode
+            float gray = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+            diffuseColor.rgb = mix(vec3(gray), diffuseColor.rgb, 1.0 + uBiomeBlend * 0.5);
+            `
+        );
+
+        // Enhanced ocean shine with biome consideration
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <roughnessmap_fragment>',
             `
             float roughnessFactor = roughness;
             #ifdef USE_ROUGHNESSMAP
                 vec4 texelRoughness = texture2D( roughnessMap, vUv );
-                // Standard roughness from map
                 roughnessFactor *= texelRoughness.g;
-                // Inverse of roughness map gives us the ocean mask
                 float ocean = 1.0 - texelRoughness.g; 
                 float oceanShineFactor = uOceanShine * ocean;
-                // Reduce roughness for shiny oceans
+                // Extra shine in biome mode for toy-like oceans
+                oceanShineFactor *= (1.0 + uBiomeBlend * 0.5);
                 roughnessFactor *= (1.0 - oceanShineFactor);
             #endif
             `

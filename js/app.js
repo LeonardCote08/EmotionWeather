@@ -1,26 +1,28 @@
 /**
  * Emotion Weather - Miniature Diorama Earth Visualization
- * V5.1 - Fixed cloud color pollution
+ * V7.0 - Performance optimized version with FPS counter
  */
 
 // --- GLOBALS & CONFIG ---
 let scene, camera, renderer, clock, postProcessing, focusController, globeController;
 let world;
+let fpsCounter;
 
 const CONFIG = {
     earth: {
         radius: 2.5,
-        segments: 256,
+        segments: 128,  // Reduced from 256 for better performance
         normalScale: 1.0,
         displacementScale: 0.1,
-        oceanShine: 0.5
+        oceanShine: 0.5,
+        biomeBlend: 0.0
     },
     clouds: {
-        opacity: 0.25,          // Reduced for cleaner diorama effect
-        altitude: 0.05,         // Height above earth surface
-        minHeight: 0.15,        // Terrain height where clouds start fading
-        maxHeight: 0.35,        // Terrain height where clouds fully disappear
-        fadePower: 2.0          // Non-linear fade curve (higher = sharper)
+        opacity: 0.25,
+        altitude: 0.05,
+        minHeight: 0.15,
+        maxHeight: 0.35,
+        fadePower: 2.0
     },
     camera: {
         fov: 35,
@@ -42,6 +44,11 @@ const CONFIG = {
         maxblur: 0.02,
         saturation: 1.3,
         brightness: 1.0,
+    },
+    performance: {
+        targetFPS: 60,
+        adaptiveQuality: true,
+        showFPS: true
     }
 };
 
@@ -51,6 +58,65 @@ const DEBUG_STATE = {
 };
 
 // --- INTERACTION CONTROLLERS ---
+
+class FPSCounter {
+    constructor() {
+        this.fps = 0;
+        this.frames = 0;
+        this.lastTime = performance.now();
+        this.updateInterval = 1000; // Update every second
+        this.lowFPSThreshold = 45;
+        this.isLowFPS = false;
+        this.element = null;
+        this.createDisplay();
+    }
+
+    createDisplay() {
+        this.element = document.createElement('div');
+        this.element.id = 'fps-counter';
+        this.element.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #00ff00;
+            padding: 5px 10px;
+            font-family: monospace;
+            font-size: 14px;
+            border-radius: 3px;
+            z-index: 1000;
+            pointer-events: none;
+        `;
+        document.body.appendChild(this.element);
+    }
+
+    update() {
+        this.frames++;
+        const currentTime = performance.now();
+        const delta = currentTime - this.lastTime;
+
+        if (delta >= this.updateInterval) {
+            this.fps = Math.round((this.frames * 1000) / delta);
+            this.frames = 0;
+            this.lastTime = currentTime;
+
+            // Update display
+            if (this.element) {
+                this.element.textContent = `FPS: ${this.fps}`;
+                this.element.style.color = this.fps < this.lowFPSThreshold ? '#ff4444' : '#00ff00';
+            }
+
+            // Check for low FPS
+            this.isLowFPS = this.fps < this.lowFPSThreshold;
+        }
+    }
+
+    destroy() {
+        if (this.element && this.element.parentNode) {
+            this.element.parentNode.removeChild(this.element);
+        }
+    }
+}
 
 class GlobeInteractionController {
     constructor(camera, earthGroup, renderer) {
@@ -222,6 +288,10 @@ async function init() {
     try {
         postProcessing = new window.PostProcessing(renderer, scene, camera);
         postProcessing.setParameters(CONFIG.postProcessing);
+
+        // Update DOF mode display
+        const dofMode = postProcessing.useSimpleDOF ? 'Simple' : 'Bokeh';
+        document.getElementById('status-dofmode').textContent = dofMode;
     } catch (e) {
         console.error('Post-processing failed to initialize.', e);
         postProcessing = null;
@@ -229,6 +299,10 @@ async function init() {
     }
 
     focusController = new FocusController(camera);
+
+    if (CONFIG.performance.showFPS) {
+        fpsCounter = new FPSCounter();
+    }
 
     resetParameters();
     setupEvents();
@@ -253,6 +327,19 @@ function animate() {
     } else {
         renderer.render(scene, camera);
     }
+
+    // Update FPS counter
+    if (fpsCounter) {
+        fpsCounter.update();
+
+        // Adaptive quality based on FPS
+        if (CONFIG.performance.adaptiveQuality && fpsCounter.isLowFPS) {
+            // Reduce quality if FPS is too low
+            if (postProcessing && postProcessing.params.maxblur > 0.005) {
+                postProcessing.setParameters({ maxblur: postProcessing.params.maxblur * 0.9 });
+            }
+        }
+    }
 }
 
 // --- EVENT HANDLERS & DEBUG ---
@@ -272,10 +359,10 @@ function setupEvents() {
 }
 
 function setupDebugControls() {
-    // Updated with new cloud parameters
+    // Updated with biome blend parameter
     const debugParams = [
         'focus', 'aperture', 'maxblur', 'saturation', 'brightness',
-        'relief', 'displacement', 'oceanShine',
+        'relief', 'displacement', 'oceanShine', 'biomeBlend',
         'cloudOpacity', 'cloudAltitude', 'cloudMinHeight', 'cloudMaxHeight', 'cloudFadePower',
         'stylization', 'paintEffect', 'nightMode', 'glowIntensity'
     ];
@@ -329,6 +416,7 @@ function handleKeyboardShortcuts(e) {
         's': logDetailedState,
         'l': toggleFrameLogging,
         'a': toggleAutoRotation,
+        'p': toggleFPSDisplay,
         '1': () => focusOnObject(0),
         '2': focusOnEarth,
         '3': () => focusOnObject(3)
@@ -339,13 +427,14 @@ function handleKeyboardShortcuts(e) {
 
 function updateDebugParameter(param, value) {
     // Handle earth and cloud parameters
-    if (['relief', 'displacement', 'oceanShine'].includes(param)) {
+    if (['relief', 'displacement', 'oceanShine', 'biomeBlend'].includes(param)) {
         let key, uniformName;
 
         switch (param) {
             case 'relief': key = 'normalScale'; break;
             case 'displacement': key = 'displacementScale'; uniformName = 'uDisplacementScale'; break;
             case 'oceanShine': key = 'oceanShine'; uniformName = 'uOceanShine'; break;
+            case 'biomeBlend': key = 'biomeBlend'; uniformName = 'uBiomeBlend'; break;
         }
 
         CONFIG.earth[key] = value;
@@ -380,8 +469,8 @@ function updateDebugParameter(param, value) {
                     // Recreate cloud sphere at new altitude
                     const newGeometry = new THREE.SphereGeometry(
                         CONFIG.earth.radius + value,
-                        CONFIG.earth.segments,
-                        CONFIG.earth.segments
+                        Math.floor(CONFIG.earth.segments * 0.5),
+                        Math.floor(CONFIG.earth.segments * 0.5)
                     );
                     world.cloudMesh.geometry.dispose();
                     world.cloudMesh.geometry = newGeometry;
@@ -417,7 +506,8 @@ function applyPreset(presetName) {
             brightness: 1.0,
             displacement: 0.05,
             relief: 0.5,
-            cloudOpacity: 0.4,      // Slightly higher for realistic
+            biomeBlend: 0.0,        // Full realistic texture
+            cloudOpacity: 0.4,
             cloudMinHeight: 0.2,
             cloudMaxHeight: 0.4,
             cloudFadePower: 1.5
@@ -431,9 +521,10 @@ function applyPreset(presetName) {
             brightness: 1.2,
             displacement: 0.15,
             relief: 1.2,
+            biomeBlend: 0.8,        // Mostly stylized biomes
             aperture: 4,
             maxblur: 0.02,
-            cloudOpacity: 0.25,     // Clean diorama clouds
+            cloudOpacity: 0.25,
             cloudMinHeight: 0.12,
             cloudMaxHeight: 0.25,
             cloudFadePower: 2.5
@@ -447,10 +538,11 @@ function applyPreset(presetName) {
             brightness: 0.9,
             displacement: 0.2,
             relief: 1.5,
+            biomeBlend: 1.0,        // Full fantasy biomes
             aperture: 3,
             maxblur: 0.025,
             focus: 6.1,
-            cloudOpacity: 0.15,     // Very subtle for night
+            cloudOpacity: 0.15,
             cloudMinHeight: 0.1,
             cloudMaxHeight: 0.2,
             cloudFadePower: 3.0
@@ -485,7 +577,8 @@ function resetParameters() {
     const earthDefaults = {
         relief: 1.0,
         displacement: 0.1,
-        oceanShine: 0.5
+        oceanShine: 0.5,
+        biomeBlend: 0.0
     };
     const cloudDefaults = {
         cloudOpacity: 0.25,
@@ -532,6 +625,17 @@ function toggleFrameLogging() {
     updateDebugStatus('framelog', DEBUG_STATE.logFrameInfo);
 }
 
+function toggleFPSDisplay() {
+    CONFIG.performance.showFPS = !CONFIG.performance.showFPS;
+    if (CONFIG.performance.showFPS && !fpsCounter) {
+        fpsCounter = new FPSCounter();
+    } else if (!CONFIG.performance.showFPS && fpsCounter) {
+        fpsCounter.destroy();
+        fpsCounter = null;
+    }
+    updateDebugStatus('fps', CONFIG.performance.showFPS);
+}
+
 function focusOnObject(index) {
     if (world.testObjects[index]) {
         const distance = camera.position.distanceTo(world.testObjects[index].mesh.position);
@@ -554,6 +658,13 @@ function logDetailedState() {
     console.log('DEBUG:', DEBUG_STATE);
     console.log('Camera pos:', camera.position);
     console.log('Post-proc:', postProcessing ? postProcessing.params : 'N/A');
+    console.log('FPS:', fpsCounter ? fpsCounter.fps : 'N/A');
+    console.log('Renderer info:', {
+        triangles: renderer.info.render.triangles,
+        calls: renderer.info.render.calls,
+        points: renderer.info.render.points,
+        lines: renderer.info.render.lines
+    });
 
     if (world.earth) {
         console.log('Material:', {
