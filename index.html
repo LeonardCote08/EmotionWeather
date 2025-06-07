@@ -309,10 +309,12 @@
         <div class="control-group"><span class="control-label">Déplacement:</span><input type="range" id="displacement" min="0" max="0.3" step="0.001" value="0.1"><input type="number" id="displacement-input" min="0" max="0.5" step="0.001" value="0.1"></div>
         <div class="control-group"><span class="control-label">Océan Brillant:</span><input type="range" id="oceanShine" min="0" max="1.0" step="0.01" value="0.5"><input type="number" id="oceanShine-input" min="0" max="1.0" step="0.01" value="0.5"></div>
 
-        <!-- NEW: Cloud controls -->
         <h3>Nuages & Atmosphère</h3>
-        <div class="control-group"><span class="control-label">Déplac. Nuages:</span><input type="range" id="cloudDisplacement" min="0" max="0.2" step="0.001" value="0.05"><input type="number" id="cloudDisplacement-input" min="0" max="0.3" step="0.001" value="0.05"></div>
-        <div class="control-group"><span class="control-label">Estompe Nuages:</span><input type="range" id="cloudFade" min="0" max="0.6" step="0.01" value="0.2"><input type="number" id="cloudFade-input" min="0" max="1" step="0.01" value="0.2"></div>
+        <div class="control-group"><span class="control-label">Opacité Nuages:</span><input type="range" id="cloudOpacity" min="0" max="0.8" step="0.01" value="0.25"><input type="number" id="cloudOpacity-input" min="0" max="1" step="0.01" value="0.25"></div>
+        <div class="control-group"><span class="control-label">Altitude Nuages:</span><input type="range" id="cloudAltitude" min="0.01" max="0.15" step="0.001" value="0.05"><input type="number" id="cloudAltitude-input" min="0" max="0.3" step="0.001" value="0.05"></div>
+        <div class="control-group"><span class="control-label">Fade Min:</span><input type="range" id="cloudMinHeight" min="0" max="0.5" step="0.01" value="0.15"><input type="number" id="cloudMinHeight-input" min="0" max="1" step="0.01" value="0.15"></div>
+        <div class="control-group"><span class="control-label">Fade Max:</span><input type="range" id="cloudMaxHeight" min="0.1" max="0.6" step="0.01" value="0.35"><input type="number" id="cloudMaxHeight-input" min="0" max="1" step="0.01" value="0.35"></div>
+        <div class="control-group"><span class="control-label">Fade Curve:</span><input type="range" id="cloudFadePower" min="0.5" max="5" step="0.1" value="2.0"><input type="number" id="cloudFadePower-input" min="0.1" max="10" step="0.1" value="2.0"></div>
 
         <h3>Miniature Style</h3>
         <div class="control-group"><span class="control-label">Stylisation:</span><input type="range" id="stylization" min="0" max="1" step="0.05" value="0"><input type="number" id="stylization-input" min="0" max="1" step="0.05" value="0"></div>

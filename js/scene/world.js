@@ -1,6 +1,6 @@
 /**
  * world.js - Manages the creation of all world-related objects
- * V4.6 - FIXED GLSL syntax error in onBeforeCompile
+ * V5.0 - Enhanced cloud fading system for diorama effect
  */
 
 const worldObjects = {
@@ -37,7 +37,7 @@ function createEarth(renderer, loadingManager) {
     });
     dayTexture.encoding = THREE.sRGBEncoding;
 
-    // --- EARTH MATERIAL (Corrected) ---
+    // --- EARTH MATERIAL ---
     const earthMaterial = new THREE.MeshStandardMaterial({
         map: dayTexture,
         normalMap: normalTexture,
@@ -53,7 +53,7 @@ function createEarth(renderer, loadingManager) {
         shader.uniforms.uDisplacementScale = { value: CONFIG.earth.displacementScale };
         shader.uniforms.uOceanShine = { value: CONFIG.earth.oceanShine };
 
-        // CORRECTION: Inject uniforms using replace() to avoid syntax errors
+        // Inject uniforms
         const commonInjection = `
             #include <common>
             uniform sampler2D uDisplacementMap;
@@ -99,77 +99,142 @@ function createEarth(renderer, loadingManager) {
     worldObjects.earth.rotation.y = Math.PI;
     worldObjects.earth.receiveShadow = true;
     worldObjects.earth.castShadow = true;
+    worldObjects.earth.renderOrder = 0;  // Render earth first
     worldObjects.earthGroup.add(worldObjects.earth);
 
-    // --- DYNAMIC CLOUD LAYER (Corrected) ---
+    // --- DYNAMIC CLOUD LAYER (Enhanced for diorama effect) ---
     const cloudMaterial = new THREE.MeshStandardMaterial({
         map: cloudTexture,
         transparent: true,
-        opacity: 0.7,
+        opacity: CONFIG.clouds.opacity,
         blending: THREE.NormalBlending,
         depthWrite: false,
-        emissive: 0x222244,
-        emissiveIntensity: 0.1
+        side: THREE.DoubleSide,
+        // No emissive to avoid color pollution
+        roughness: 1.0,  // Matte clouds for diorama style
+        metalness: 0.0   // Non-metallic
     });
 
     cloudMaterial.onBeforeCompile = (shader) => {
-        console.log('Compiling custom CLOUD shader...');
+        console.log('Compiling enhanced CLOUD shader...');
         shader.uniforms.uDisplacementMap = { value: displacementTexture };
-        shader.uniforms.uCloudDisplacementScale = { value: CONFIG.earth.cloudDisplacementScale };
-        shader.uniforms.uCloudFadeThreshold = { value: CONFIG.earth.cloudFadeThreshold };
+        shader.uniforms.uCloudAltitude = { value: CONFIG.clouds.altitude };
+        shader.uniforms.uCloudMinHeight = { value: CONFIG.clouds.minHeight };
+        shader.uniforms.uCloudMaxHeight = { value: CONFIG.clouds.maxHeight };
+        shader.uniforms.uCloudFadePower = { value: CONFIG.clouds.fadePower };
 
-        // CORRECTION: Inject uniforms using replace()
+        // Inject uniforms
         const cloudCommonInjection = `
             #include <common>
             uniform sampler2D uDisplacementMap;
-            uniform float uCloudDisplacementScale;
-            uniform float uCloudFadeThreshold;
+            uniform float uCloudAltitude;
+            uniform float uCloudMinHeight;
+            uniform float uCloudMaxHeight;
+            uniform float uCloudFadePower;
+            
+            varying float vDisplacement;
         `;
         shader.vertexShader = shader.vertexShader.replace('#include <common>', cloudCommonInjection);
         shader.fragmentShader = shader.fragmentShader.replace('#include <common>', cloudCommonInjection);
 
-        // Inject vertex displacement for clouds
+        // Pass displacement to fragment shader
         shader.vertexShader = shader.vertexShader.replace(
-            '#include <begin_vertex>',
+            '#include <worldpos_vertex>',
             `
-            #include <begin_vertex>
-            float displacement = texture2D(uDisplacementMap, uv).r;
-            transformed += normalize(normal) * displacement * uCloudDisplacementScale;
+            vDisplacement = texture2D(uDisplacementMap, uv).r;
+            #include <worldpos_vertex>
             `
         );
 
-        // Inject fragment fade logic for clouds
+        // Enhanced fade logic for diorama effect
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <output_fragment>',
             `
             #include <output_fragment>
-            float displacement = texture2D(uDisplacementMap, vUv).r;
-            float fadeFactor = 1.0 - smoothstep(uCloudFadeThreshold, uCloudFadeThreshold + 0.2, displacement);
-            gl_FragColor.a *= fadeFactor;
+            
+            // Sophisticated height-based fade
+            float heightFade = 1.0;
+            
+            // Fade out clouds where terrain is high
+            if (vDisplacement > uCloudMinHeight) {
+                float fadeRange = uCloudMaxHeight - uCloudMinHeight;
+                float fadeProgress = (vDisplacement - uCloudMinHeight) / fadeRange;
+                fadeProgress = clamp(fadeProgress, 0.0, 1.0);
+                
+                // Non-linear fade for more artistic control
+                heightFade = 1.0 - pow(fadeProgress, uCloudFadePower);
+                
+                // Add slight noise to break up hard edges
+                float noise = fract(sin(dot(vUv * 100.0, vec2(12.9898, 78.233))) * 43758.5453);
+                heightFade -= noise * 0.1 * fadeProgress;
+                heightFade = clamp(heightFade, 0.0, 1.0);
+            }
+            
+            // Apply the fade
+            gl_FragColor.a *= heightFade;
+            
+            // Extra fade at sphere edges for softer look
+            vec2 center = vUv - 0.5;
+            float edgeFade = 1.0 - smoothstep(0.45, 0.5, length(center));
+            gl_FragColor.a *= edgeFade;
+            
+            // Ensure clouds are purely white/grey (no color tinting)
+            vec3 cloudColor = gl_FragColor.rgb;
+            float cloudGray = dot(cloudColor, vec3(0.299, 0.587, 0.114));
+            gl_FragColor.rgb = vec3(cloudGray);
             `
         );
         cloudMaterial.userData.shader = shader;
     };
 
     worldObjects.cloudMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(CONFIG.earth.radius + 0.03, CONFIG.earth.segments, CONFIG.earth.segments),
+        new THREE.SphereGeometry(
+            CONFIG.earth.radius + CONFIG.clouds.altitude,
+            CONFIG.earth.segments,
+            CONFIG.earth.segments
+        ),
         cloudMaterial
     );
-    worldObjects.cloudMesh.castShadow = true;
+    // Clouds don't cast shadows in diorama style - keeps it clean
+    worldObjects.cloudMesh.castShadow = false;
+    worldObjects.cloudMesh.receiveShadow = false;
+    // Render clouds after earth to avoid blending issues
+    worldObjects.cloudMesh.renderOrder = 1;
     worldObjects.earthGroup.add(worldObjects.cloudMesh);
 
-    // --- ATMOSPHERE (Unchanged) ---
+    // --- ATMOSPHERE ---
     const atmosphereMaterial = new THREE.ShaderMaterial({
-        uniforms: { 'c': { value: 0.3 }, 'p': { value: 5.0 }, 'glowColor': { value: new THREE.Vector3(0.6, 0.3, 1.0) } },
-        vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-        fragmentShader: `uniform float c; uniform float p; uniform vec3 glowColor; varying vec3 vNormal; void main() { float intensity = pow(c - dot(vNormal, vec3(0.0, 0.0, 1.0)), p); gl_FragColor = vec4(glowColor, 1.0) * intensity; }`,
-        side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true
+        uniforms: {
+            'c': { value: 0.3 },
+            'p': { value: 5.0 },
+            'glowColor': { value: new THREE.Vector3(0.6, 0.3, 1.0) }
+        },
+        vertexShader: `
+            varying vec3 vNormal; 
+            void main() { 
+                vNormal = normalize(normalMatrix * normal); 
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); 
+            }`,
+        fragmentShader: `
+            uniform float c; 
+            uniform float p; 
+            uniform vec3 glowColor; 
+            varying vec3 vNormal; 
+            void main() { 
+                float intensity = pow(c - dot(vNormal, vec3(0.0, 0.0, 1.0)), p); 
+                gl_FragColor = vec4(glowColor, 1.0) * intensity; 
+            }`,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        transparent: true
     });
-    const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(CONFIG.earth.radius * 1.08, CONFIG.earth.segments, CONFIG.earth.segments), atmosphereMaterial);
+    const atmosphere = new THREE.Mesh(
+        new THREE.SphereGeometry(CONFIG.earth.radius * 1.08, CONFIG.earth.segments, CONFIG.earth.segments),
+        atmosphereMaterial
+    );
     worldObjects.earthGroup.add(atmosphere);
 }
 
-// ... Le reste du fichier est inchangé ...
 function createStars(scene) {
     const starCount = 15000;
     const geometry = new THREE.BufferGeometry();

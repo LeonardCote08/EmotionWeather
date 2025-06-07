@@ -1,6 +1,6 @@
 /**
  * Emotion Weather - Miniature Diorama Earth Visualization
- * V4.3 - Fixed DOF parameters for visible tilt-shift effect
+ * V5.1 - Fixed cloud color pollution
  */
 
 // --- GLOBALS & CONFIG ---
@@ -13,10 +13,14 @@ const CONFIG = {
         segments: 256,
         normalScale: 1.0,
         displacementScale: 0.1,
-        oceanShine: 0.5,
-        // NEW: Cloud parameters
-        cloudDisplacementScale: 0.05, // How much clouds are lifted by terrain
-        cloudFadeThreshold: 0.2,     // Altitude where clouds start to fade
+        oceanShine: 0.5
+    },
+    clouds: {
+        opacity: 0.25,          // Reduced for cleaner diorama effect
+        altitude: 0.05,         // Height above earth surface
+        minHeight: 0.15,        // Terrain height where clouds start fading
+        maxHeight: 0.35,        // Terrain height where clouds fully disappear
+        fadePower: 2.0          // Non-linear fade curve (higher = sharper)
     },
     camera: {
         fov: 35,
@@ -40,7 +44,6 @@ const CONFIG = {
         brightness: 1.0,
     }
 };
-
 
 const DEBUG_STATE = {
     showTestObjects: false,
@@ -196,14 +199,14 @@ async function init() {
     renderer = new THREE.WebGLRenderer({
         antialias: true,
         powerPreference: "high-performance",
-        logarithmicDepthBuffer: false  // Important for BokehPass depth accuracy
+        logarithmicDepthBuffer: false
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputEncoding = THREE.sRGBEncoding;
-    renderer.autoClear = false;  // Important for post-processing
+    renderer.autoClear = false;
     document.getElementById('canvas-container').appendChild(renderer.domElement);
 
     const loadingManager = new THREE.LoadingManager();
@@ -269,8 +272,13 @@ function setupEvents() {
 }
 
 function setupDebugControls() {
-    // UPDATED: Add new cloud parameters
-    const debugParams = ['focus', 'aperture', 'maxblur', 'saturation', 'brightness', 'relief', 'displacement', 'oceanShine', 'cloudDisplacement', 'cloudFade', 'stylization', 'paintEffect', 'nightMode', 'glowIntensity'];
+    // Updated with new cloud parameters
+    const debugParams = [
+        'focus', 'aperture', 'maxblur', 'saturation', 'brightness',
+        'relief', 'displacement', 'oceanShine',
+        'cloudOpacity', 'cloudAltitude', 'cloudMinHeight', 'cloudMaxHeight', 'cloudFadePower',
+        'stylization', 'paintEffect', 'nightMode', 'glowIntensity'
+    ];
 
     debugParams.forEach(param => {
         const slider = document.getElementById(param);
@@ -283,7 +291,7 @@ function setupDebugControls() {
 
         slider.addEventListener('input', (e) => {
             const value = parseFloat(e.target.value);
-            const precision = ['maxblur', 'displacement', 'oceanShine', 'cloudDisplacement', 'cloudFade'].includes(param) ? 3 : 2;
+            const precision = ['maxblur', 'displacement', 'oceanShine', 'cloudAltitude'].includes(param) ? 3 : 2;
             input.value = value.toFixed(precision);
             updateValue(value);
         });
@@ -329,38 +337,70 @@ function handleKeyboardShortcuts(e) {
     if (keyActions[e.key.toLowerCase()]) keyActions[e.key.toLowerCase()]();
 }
 
-
 function updateDebugParameter(param, value) {
-    // UPDATED: Handle new cloud parameters
-    if (['relief', 'displacement', 'oceanShine', 'cloudDisplacement', 'cloudFade'].includes(param)) {
+    // Handle earth and cloud parameters
+    if (['relief', 'displacement', 'oceanShine'].includes(param)) {
         let key, uniformName;
 
         switch (param) {
             case 'relief': key = 'normalScale'; break;
             case 'displacement': key = 'displacementScale'; uniformName = 'uDisplacementScale'; break;
             case 'oceanShine': key = 'oceanShine'; uniformName = 'uOceanShine'; break;
-            case 'cloudDisplacement': key = 'cloudDisplacementScale'; uniformName = 'uCloudDisplacementScale'; break;
-            case 'cloudFade': key = 'cloudFadeThreshold'; uniformName = 'uCloudFadeThreshold'; break;
         }
 
         CONFIG.earth[key] = value;
 
         // Update earth uniforms
-        if (world?.earth?.material?.userData?.shader) {
+        if (world?.earth?.material) {
             if (key === 'normalScale') {
                 world.earth.material.normalScale.set(value, value);
-            } else if (uniformName && world.earth.material.userData.shader.uniforms[uniformName]) {
+            } else if (uniformName && world.earth.material.userData?.shader?.uniforms[uniformName]) {
                 world.earth.material.userData.shader.uniforms[uniformName].value = value;
             }
         }
+    } else if (param.startsWith('cloud')) {
+        // Handle cloud parameters
+        const cloudParamMap = {
+            'cloudOpacity': 'opacity',
+            'cloudAltitude': 'altitude',
+            'cloudMinHeight': 'minHeight',
+            'cloudMaxHeight': 'maxHeight',
+            'cloudFadePower': 'fadePower'
+        };
 
-        // Update cloud uniforms
-        if (world?.cloudMesh?.material?.userData?.shader) {
-            if (uniformName && world.cloudMesh.material.userData.shader.uniforms[uniformName]) {
-                world.cloudMesh.material.userData.shader.uniforms[uniformName].value = value;
+        const cloudKey = cloudParamMap[param];
+        if (cloudKey) {
+            CONFIG.clouds[cloudKey] = value;
+
+            // Update cloud material/uniforms
+            if (world?.cloudMesh?.material) {
+                if (param === 'cloudOpacity') {
+                    world.cloudMesh.material.opacity = value;
+                } else if (param === 'cloudAltitude') {
+                    // Recreate cloud sphere at new altitude
+                    const newGeometry = new THREE.SphereGeometry(
+                        CONFIG.earth.radius + value,
+                        CONFIG.earth.segments,
+                        CONFIG.earth.segments
+                    );
+                    world.cloudMesh.geometry.dispose();
+                    world.cloudMesh.geometry = newGeometry;
+                } else {
+                    // Update shader uniforms
+                    const uniformMap = {
+                        'cloudMinHeight': 'uCloudMinHeight',
+                        'cloudMaxHeight': 'uCloudMaxHeight',
+                        'cloudFadePower': 'uCloudFadePower'
+                    };
+                    const uniformName = uniformMap[param];
+                    if (uniformName && world.cloudMesh.material.userData?.shader?.uniforms[uniformName]) {
+                        world.cloudMesh.material.userData.shader.uniforms[uniformName].value = value;
+                    }
+                }
             }
         }
     } else {
+        // Post-processing parameters
         CONFIG.postProcessing[param] = value;
         if (postProcessing) postProcessing.setParameters({ [param]: value });
     }
@@ -376,7 +416,11 @@ function applyPreset(presetName) {
             saturation: 1.0,
             brightness: 1.0,
             displacement: 0.05,
-            relief: 0.5
+            relief: 0.5,
+            cloudOpacity: 0.4,      // Slightly higher for realistic
+            cloudMinHeight: 0.2,
+            cloudMaxHeight: 0.4,
+            cloudFadePower: 1.5
         },
         miniature: {
             stylization: 0.7,
@@ -388,7 +432,11 @@ function applyPreset(presetName) {
             displacement: 0.15,
             relief: 1.2,
             aperture: 4,
-            maxblur: 0.02
+            maxblur: 0.02,
+            cloudOpacity: 0.25,     // Clean diorama clouds
+            cloudMinHeight: 0.12,
+            cloudMaxHeight: 0.25,
+            cloudFadePower: 2.5
         },
         night: {
             stylization: 1.0,
@@ -401,7 +449,11 @@ function applyPreset(presetName) {
             relief: 1.5,
             aperture: 3,
             maxblur: 0.025,
-            focus: 6.1
+            focus: 6.1,
+            cloudOpacity: 0.15,     // Very subtle for night
+            cloudMinHeight: 0.1,
+            cloudMaxHeight: 0.2,
+            cloudFadePower: 3.0
         }
     };
 
@@ -413,18 +465,20 @@ function applyPreset(presetName) {
         const slider = document.getElementById(key);
         const input = document.getElementById(key + '-input');
         if (slider) slider.value = value;
-        if (input) input.value = value.toFixed(['maxblur', 'displacement', 'oceanShine'].includes(key) ? 3 : 2);
+        if (input) {
+            const precision = ['maxblur', 'displacement', 'oceanShine', 'cloudAltitude'].includes(key) ? 3 : 2;
+            input.value = value.toFixed(precision);
+        }
     });
 
     console.log(`Applied preset: ${presetName}`);
 }
 
 function resetParameters() {
-    // FIXED: Updated default values for Three.js r128 BokehPass
     const ppDefaults = {
         focus: 6.5,
-        aperture: 2.5,      // Good starting value
-        maxblur: 0.01,      // Smaller value for r128
+        aperture: 2.5,
+        maxblur: 0.01,
         saturation: 1.3,
         brightness: 1.0
     };
@@ -433,17 +487,27 @@ function resetParameters() {
         displacement: 0.1,
         oceanShine: 0.5
     };
-    const allDefaults = { ...ppDefaults, ...earthDefaults };
+    const cloudDefaults = {
+        cloudOpacity: 0.25,
+        cloudAltitude: 0.05,
+        cloudMinHeight: 0.15,
+        cloudMaxHeight: 0.35,
+        cloudFadePower: 2.0
+    };
+    const allDefaults = { ...ppDefaults, ...earthDefaults, ...cloudDefaults };
 
     Object.entries(allDefaults).forEach(([key, value]) => {
         updateDebugParameter(key, value);
         const slider = document.getElementById(key);
         const input = document.getElementById(key + '-input');
         if (slider) slider.value = value;
-        if (input) input.value = value.toFixed(['maxblur', 'displacement', 'oceanShine'].includes(key) ? 3 : 2);
+        if (input) {
+            const precision = ['maxblur', 'displacement', 'oceanShine', 'cloudAltitude'].includes(key) ? 3 : 2;
+            input.value = value.toFixed(precision);
+        }
     });
 
-    console.log('Parameters reset to defaults for Three.js r128');
+    console.log('Parameters reset to defaults');
 }
 
 function toggleAutoRotation() {
