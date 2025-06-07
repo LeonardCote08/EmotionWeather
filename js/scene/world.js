@@ -1,6 +1,6 @@
 /**
  * world.js - Manages the creation of all world-related objects
- * Enhanced for miniature diorama aesthetic
+ * V4.6 - FIXED GLSL syntax error in onBeforeCompile
  */
 
 const worldObjects = {
@@ -37,7 +37,7 @@ function createEarth(renderer, loadingManager) {
     });
     dayTexture.encoding = THREE.sRGBEncoding;
 
-    // Enhanced material for miniature look
+    // --- EARTH MATERIAL (Corrected) ---
     const earthMaterial = new THREE.MeshStandardMaterial({
         map: dayTexture,
         normalMap: normalTexture,
@@ -48,15 +48,23 @@ function createEarth(renderer, loadingManager) {
     });
 
     earthMaterial.onBeforeCompile = (shader) => {
+        console.log("Compiling custom EARTH shader...");
         shader.uniforms.uDisplacementMap = { value: displacementTexture };
         shader.uniforms.uDisplacementScale = { value: CONFIG.earth.displacementScale };
         shader.uniforms.uOceanShine = { value: CONFIG.earth.oceanShine };
 
-        shader.vertexShader = `
+        // CORRECTION: Inject uniforms using replace() to avoid syntax errors
+        const commonInjection = `
+            #include <common>
             uniform sampler2D uDisplacementMap;
             uniform float uDisplacementScale;
-        ` + shader.vertexShader;
+            uniform float uOceanShine;
+        `;
 
+        shader.vertexShader = shader.vertexShader.replace('#include <common>', commonInjection);
+        shader.fragmentShader = shader.fragmentShader.replace('#include <common>', commonInjection);
+
+        // Inject vertex displacement logic
         shader.vertexShader = shader.vertexShader.replace(
             '#include <begin_vertex>',
             `
@@ -66,24 +74,23 @@ function createEarth(renderer, loadingManager) {
             `
         );
 
-        shader.fragmentShader = `
-            uniform float uOceanShine;
-        ` + shader.fragmentShader;
-
+        // Inject fragment ocean shine logic
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <roughnessmap_fragment>',
             `
             float roughnessFactor = roughness;
             #ifdef USE_ROUGHNESSMAP
                 vec4 texelRoughness = texture2D( roughnessMap, vUv );
+                // Standard roughness from map
                 roughnessFactor *= texelRoughness.g;
+                // Inverse of roughness map gives us the ocean mask
                 float ocean = 1.0 - texelRoughness.g; 
                 float oceanShineFactor = uOceanShine * ocean;
+                // Reduce roughness for shiny oceans
                 roughnessFactor *= (1.0 - oceanShineFactor);
             #endif
             `
         );
-
         earthMaterial.userData.shader = shader;
     };
 
@@ -94,7 +101,7 @@ function createEarth(renderer, loadingManager) {
     worldObjects.earth.castShadow = true;
     worldObjects.earthGroup.add(worldObjects.earth);
 
-    // Dreamy cloud layer
+    // --- DYNAMIC CLOUD LAYER (Corrected) ---
     const cloudMaterial = new THREE.MeshStandardMaterial({
         map: cloudTexture,
         transparent: true,
@@ -104,6 +111,46 @@ function createEarth(renderer, loadingManager) {
         emissive: 0x222244,
         emissiveIntensity: 0.1
     });
+
+    cloudMaterial.onBeforeCompile = (shader) => {
+        console.log('Compiling custom CLOUD shader...');
+        shader.uniforms.uDisplacementMap = { value: displacementTexture };
+        shader.uniforms.uCloudDisplacementScale = { value: CONFIG.earth.cloudDisplacementScale };
+        shader.uniforms.uCloudFadeThreshold = { value: CONFIG.earth.cloudFadeThreshold };
+
+        // CORRECTION: Inject uniforms using replace()
+        const cloudCommonInjection = `
+            #include <common>
+            uniform sampler2D uDisplacementMap;
+            uniform float uCloudDisplacementScale;
+            uniform float uCloudFadeThreshold;
+        `;
+        shader.vertexShader = shader.vertexShader.replace('#include <common>', cloudCommonInjection);
+        shader.fragmentShader = shader.fragmentShader.replace('#include <common>', cloudCommonInjection);
+
+        // Inject vertex displacement for clouds
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <begin_vertex>',
+            `
+            #include <begin_vertex>
+            float displacement = texture2D(uDisplacementMap, uv).r;
+            transformed += normalize(normal) * displacement * uCloudDisplacementScale;
+            `
+        );
+
+        // Inject fragment fade logic for clouds
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <output_fragment>',
+            `
+            #include <output_fragment>
+            float displacement = texture2D(uDisplacementMap, vUv).r;
+            float fadeFactor = 1.0 - smoothstep(uCloudFadeThreshold, uCloudFadeThreshold + 0.2, displacement);
+            gl_FragColor.a *= fadeFactor;
+            `
+        );
+        cloudMaterial.userData.shader = shader;
+    };
+
     worldObjects.cloudMesh = new THREE.Mesh(
         new THREE.SphereGeometry(CONFIG.earth.radius + 0.03, CONFIG.earth.segments, CONFIG.earth.segments),
         cloudMaterial
@@ -111,41 +158,20 @@ function createEarth(renderer, loadingManager) {
     worldObjects.cloudMesh.castShadow = true;
     worldObjects.earthGroup.add(worldObjects.cloudMesh);
 
-    // Fantastical atmosphere with purple glow
+    // --- ATMOSPHERE (Unchanged) ---
     const atmosphereMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-            'c': { value: 0.3 },
-            'p': { value: 5.0 },
-            'glowColor': { value: new THREE.Vector3(0.6, 0.3, 1.0) } // Purple glow
-        },
-        vertexShader: `
-            varying vec3 vNormal; 
-            void main() { 
-                vNormal = normalize(normalMatrix * normal); 
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); 
-            }`,
-        fragmentShader: `
-            uniform float c; 
-            uniform float p; 
-            uniform vec3 glowColor;
-            varying vec3 vNormal; 
-            void main() { 
-                float intensity = pow(c - dot(vNormal, vec3(0.0, 0.0, 1.0)), p); 
-                gl_FragColor = vec4(glowColor, 1.0) * intensity; 
-            }`,
-        side: THREE.BackSide,
-        blending: THREE.AdditiveBlending,
-        transparent: true
+        uniforms: { 'c': { value: 0.3 }, 'p': { value: 5.0 }, 'glowColor': { value: new THREE.Vector3(0.6, 0.3, 1.0) } },
+        vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float c; uniform float p; uniform vec3 glowColor; varying vec3 vNormal; void main() { float intensity = pow(c - dot(vNormal, vec3(0.0, 0.0, 1.0)), p); gl_FragColor = vec4(glowColor, 1.0) * intensity; }`,
+        side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true
     });
-    const atmosphere = new THREE.Mesh(
-        new THREE.SphereGeometry(CONFIG.earth.radius * 1.08, CONFIG.earth.segments, CONFIG.earth.segments),
-        atmosphereMaterial
-    );
+    const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(CONFIG.earth.radius * 1.08, CONFIG.earth.segments, CONFIG.earth.segments), atmosphereMaterial);
     worldObjects.earthGroup.add(atmosphere);
 }
 
+// ... Le reste du fichier est inchangé ...
 function createStars(scene) {
-    const starCount = 15000; // More stars for dramatic effect
+    const starCount = 15000;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
@@ -162,28 +188,15 @@ function createStars(scene) {
         positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
         positions[i3 + 2] = radius * Math.cos(phi);
 
-        // More colorful stars
         const colorTemp = Math.random();
         if (colorTemp < 0.2) {
-            // Purple stars
-            colors[i3] = 0.8;
-            colors[i3 + 1] = 0.5;
-            colors[i3 + 2] = 1.0;
+            colors[i3] = 0.8; colors[i3 + 1] = 0.5; colors[i3 + 2] = 1.0;
         } else if (colorTemp < 0.4) {
-            // Green stars
-            colors[i3] = 0.5;
-            colors[i3 + 1] = 1.0;
-            colors[i3 + 2] = 0.6;
+            colors[i3] = 0.5; colors[i3 + 1] = 1.0; colors[i3 + 2] = 0.6;
         } else if (colorTemp < 0.7) {
-            // White stars
-            colors[i3] = 1.0;
-            colors[i3 + 1] = 1.0;
-            colors[i3 + 2] = 1.0;
+            colors[i3] = 1.0; colors[i3 + 1] = 1.0; colors[i3 + 2] = 1.0;
         } else {
-            // Orange stars
-            colors[i3] = 1.0;
-            colors[i3 + 1] = 0.6;
-            colors[i3 + 2] = 0.3;
+            colors[i3] = 1.0; colors[i3 + 1] = 0.6; colors[i3 + 2] = 0.3;
         }
     }
 

@@ -14,6 +14,9 @@ const CONFIG = {
         normalScale: 1.0,
         displacementScale: 0.1,
         oceanShine: 0.5,
+        // NEW: Cloud parameters
+        cloudDisplacementScale: 0.05, // How much clouds are lifted by terrain
+        cloudFadeThreshold: 0.2,     // Altitude where clouds start to fade
     },
     camera: {
         fov: 35,
@@ -31,12 +34,13 @@ const CONFIG = {
     },
     postProcessing: {
         focus: 6.5,
-        aperture: 2.0,      // FIXED: Smaller values = stronger blur (like f-stop)
-        maxblur: 0.02,      // FIXED: Increased for more visible effect
+        aperture: 2.0,
+        maxblur: 0.02,
         saturation: 1.3,
         brightness: 1.0,
     }
 };
+
 
 const DEBUG_STATE = {
     showTestObjects: false,
@@ -265,7 +269,8 @@ function setupEvents() {
 }
 
 function setupDebugControls() {
-    const debugParams = ['focus', 'aperture', 'maxblur', 'saturation', 'brightness', 'relief', 'displacement', 'oceanShine', 'stylization', 'paintEffect', 'nightMode', 'glowIntensity'];
+    // UPDATED: Add new cloud parameters
+    const debugParams = ['focus', 'aperture', 'maxblur', 'saturation', 'brightness', 'relief', 'displacement', 'oceanShine', 'cloudDisplacement', 'cloudFade', 'stylization', 'paintEffect', 'nightMode', 'glowIntensity'];
 
     debugParams.forEach(param => {
         const slider = document.getElementById(param);
@@ -278,7 +283,8 @@ function setupDebugControls() {
 
         slider.addEventListener('input', (e) => {
             const value = parseFloat(e.target.value);
-            input.value = value.toFixed(['maxblur', 'displacement', 'oceanShine'].includes(param) ? 3 : 2);
+            const precision = ['maxblur', 'displacement', 'oceanShine', 'cloudDisplacement', 'cloudFade'].includes(param) ? 3 : 2;
+            input.value = value.toFixed(precision);
             updateValue(value);
         });
 
@@ -323,17 +329,35 @@ function handleKeyboardShortcuts(e) {
     if (keyActions[e.key.toLowerCase()]) keyActions[e.key.toLowerCase()]();
 }
 
+
 function updateDebugParameter(param, value) {
-    if (['relief', 'displacement', 'oceanShine'].includes(param)) {
-        const key = param === 'relief' ? 'normalScale' : param === 'displacement' ? 'displacementScale' : 'oceanShine';
+    // UPDATED: Handle new cloud parameters
+    if (['relief', 'displacement', 'oceanShine', 'cloudDisplacement', 'cloudFade'].includes(param)) {
+        let key, uniformName;
+
+        switch (param) {
+            case 'relief': key = 'normalScale'; break;
+            case 'displacement': key = 'displacementScale'; uniformName = 'uDisplacementScale'; break;
+            case 'oceanShine': key = 'oceanShine'; uniformName = 'uOceanShine'; break;
+            case 'cloudDisplacement': key = 'cloudDisplacementScale'; uniformName = 'uCloudDisplacementScale'; break;
+            case 'cloudFade': key = 'cloudFadeThreshold'; uniformName = 'uCloudFadeThreshold'; break;
+        }
+
         CONFIG.earth[key] = value;
 
-        if (world && world.earth && world.earth.material.userData.shader) {
+        // Update earth uniforms
+        if (world?.earth?.material?.userData?.shader) {
             if (key === 'normalScale') {
                 world.earth.material.normalScale.set(value, value);
-            } else {
-                const uniformName = key === 'displacementScale' ? 'uDisplacementScale' : 'uOceanShine';
+            } else if (uniformName && world.earth.material.userData.shader.uniforms[uniformName]) {
                 world.earth.material.userData.shader.uniforms[uniformName].value = value;
+            }
+        }
+
+        // Update cloud uniforms
+        if (world?.cloudMesh?.material?.userData?.shader) {
+            if (uniformName && world.cloudMesh.material.userData.shader.uniforms[uniformName]) {
+                world.cloudMesh.material.userData.shader.uniforms[uniformName].value = value;
             }
         }
     } else {
